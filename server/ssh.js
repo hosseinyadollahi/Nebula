@@ -212,13 +212,15 @@ export class SSHSession {
         stream.on('close', (code, signal) => {
             if (code === 0) {
                  this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Command executed', action: 'exec' }));
+            } else if (code === 127) {
+                 this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: `Command not found (code 127). Is the required tool (zip/unzip) installed?` }));
             } else {
                  this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: `Command failed with code ${code}` }));
             }
         }).on('data', (data) => {
-            // Consume stdout to prevent buffer full hang
+            // Consume stdout
         }).stderr.on('data', (data) => {
-            // Consume stderr to prevent buffer full hang
+            // Consume stderr
         });
     });
   }

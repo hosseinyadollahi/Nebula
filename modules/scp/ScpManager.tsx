@@ -29,7 +29,7 @@ const FileIcon = ({ name, isDirectory, size = 'sm' }: { name: string, isDirector
   switch(ext) {
     case 'jpg': case 'jpeg': case 'png': case 'gif': case 'svg':
       return <FileImage className={`${iconClass} text-purple-400`} />;
-    case 'zip': case 'tar': case 'gz': case 'rar':
+    case 'zip': case 'tar': case 'gz': case 'rar': case 'tgz':
       return <FileArchive className={`${iconClass} text-red-400`} />;
     case 'js': case 'ts': case 'py': case 'html': case 'css': case 'json':
       return <FileCode className={`${iconClass} text-blue-400`} />;
@@ -63,8 +63,9 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   
-  const [modalType, setModalType] = useState<'createFolder' | 'createFile' | 'rename' | 'permissions' | null>(null);
+  const [modalType, setModalType] = useState<'createFolder' | 'createFile' | 'rename' | 'permissions' | 'compress' | null>(null);
   const [modalInput, setModalInput] = useState('');
+  const [compressionFormat, setCompressionFormat] = useState<'zip' | 'tar'>('zip');
   
   const [transfer, setTransfer] = useState<TransferStatus>({ isActive: false, type: 'upload', filename: '', progress: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -98,10 +99,11 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
                 break;
             case 'SFTP_SAVED':
                 setIsSaving(false);
-                setEditorOpen(false);
-                // Also close create modal if open
+                // Ensure create modal is closed immediately
                 setModalType(null);
                 setModalInput('');
+                setEditorOpen(false);
+                setIsLoading(false); 
                 refreshRemote(remotePath);
                 break;
             case 'SFTP_ACTION_SUCCESS':
@@ -209,6 +211,20 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
           case 'permissions':
               socket?.send(JSON.stringify({ type: 'SFTP_CHMOD', path: current.path, mode: modalInput }));
               break;
+          case 'compress':
+              const source = current.name;
+              let cmd = '';
+              let outFile = modalInput;
+              
+              if (compressionFormat === 'zip') {
+                  if(!outFile.toLowerCase().endsWith('.zip')) outFile += '.zip';
+                  cmd = `cd "${remotePath}" && zip -r "${outFile}" "${source}"`;
+              } else {
+                  if(!outFile.toLowerCase().endsWith('.tar.gz') && !outFile.toLowerCase().endsWith('.tgz')) outFile += '.tar.gz';
+                  cmd = `cd "${remotePath}" && tar -czf "${outFile}" "${source}"`;
+              }
+              socket?.send(JSON.stringify({ type: 'SFTP_EXEC', command: cmd }));
+              break;
       }
   };
 
@@ -219,9 +235,25 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
       }
   };
 
-  const handleZip = (file: FileEntry) => {
+  const handleCompressRequest = (file: FileEntry) => {
+      setModalType('compress');
+      setModalInput(file.name);
+      setCompressionFormat('zip'); // Default to zip
+      setContextMenu(null);
+  };
+
+  const handleExtract = (file: FileEntry) => {
       setIsLoading(true);
-      const cmd = `cd "${remotePath}" && zip -r "${file.name}.zip" "${file.name}"`;
+      let cmd = '';
+      if (file.name.endsWith('.zip')) {
+          cmd = `cd "${remotePath}" && unzip "${file.name}"`;
+      } else if (file.name.endsWith('.tar.gz') || file.name.endsWith('.tgz')) {
+          cmd = `cd "${remotePath}" && tar -xzf "${file.name}"`;
+      } else {
+          setError("Unsupported archive format. Try using terminal.");
+          setIsLoading(false);
+          return;
+      }
       socket?.send(JSON.stringify({ type: 'SFTP_EXEC', command: cmd }));
   };
 
@@ -248,6 +280,8 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
       if (a.isDirectory !== b.isDirectory) return a.isDirectory ? -1 : 1;
       return sortDir === 'asc' ? res : -res;
   });
+
+  const isArchive = (name: string) => name.endsWith('.zip') || name.endsWith('.tar.gz') || name.endsWith('.tgz');
 
   return (
     <div className={`h-full flex flex-col bg-slate-950 ${active ? 'flex' : 'hidden'} text-slate-200 select-none`} onClick={() => setContextMenu(null)}>
@@ -425,7 +459,13 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
               <button onClick={() => { setModalType('permissions'); setModalInput('755'); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Shield className="w-4 h-4"/> Permissions</button>
               <div className="my-1 border-t border-slate-700"/>
               {!contextMenu.file.isDirectory && <button onClick={() => { handleDownload(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Download className="w-4 h-4"/> Download</button>}
-              <button onClick={() => { handleZip(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Archive className="w-4 h-4"/> Compress</button>
+              
+              <button onClick={() => handleCompressRequest(contextMenu.file)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Archive className="w-4 h-4"/> Compress</button>
+              
+              {isArchive(contextMenu.file.name) && (
+                <button onClick={() => { handleExtract(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Archive className="w-4 h-4"/> Extract</button>
+              )}
+              
               <button onClick={() => { handleDelete(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-red-900/30 text-red-400 flex items-center gap-2 text-sm"><Trash2 className="w-4 h-4"/> Delete</button>
           </div>
       )}
@@ -435,23 +475,42 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
           <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95">
                   <h3 className="text-lg font-bold text-white mb-1 capitalize">
-                      {modalType === 'permissions' ? 'Change Permissions' : modalType.replace(/([A-Z])/g, ' $1').trim()}
+                      {modalType === 'permissions' ? 'Change Permissions' : modalType === 'compress' ? 'Compress Files' : modalType.replace(/([A-Z])/g, ' $1').trim()}
                   </h3>
                   <p className="text-sm text-slate-500 mb-4">
-                      {modalType === 'rename' ? 'Enter the new name for the item.' : modalType === 'permissions' ? 'Enter octal code (e.g. 755).' : 'Enter a name for the new item.'}
+                      {modalType === 'rename' ? 'Enter the new name for the item.' : modalType === 'permissions' ? 'Enter octal code (e.g. 755).' : modalType === 'compress' ? 'Choose compression format.' : 'Enter a name for the new item.'}
                   </p>
+                  
+                  {modalType === 'compress' && (
+                     <div className="grid grid-cols-2 gap-3 mb-4">
+                         <button 
+                             onClick={() => setCompressionFormat('zip')}
+                             className={`flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm font-medium transition-all ${compressionFormat === 'zip' ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
+                         >
+                            <FileArchive className="w-4 h-4"/> .ZIP
+                         </button>
+                         <button 
+                             onClick={() => setCompressionFormat('tar')}
+                             className={`flex items-center justify-center gap-2 py-2.5 rounded-lg border text-sm font-medium transition-all ${compressionFormat === 'tar' ? 'bg-emerald-600/20 border-emerald-500 text-emerald-400' : 'bg-slate-800 border-slate-700 text-slate-400 hover:bg-slate-700'}`}
+                         >
+                            <FileArchive className="w-4 h-4"/> .TAR.GZ
+                         </button>
+                     </div>
+                  )}
+
                   <input 
                     type="text" 
                     value={modalInput}
                     onChange={(e) => setModalInput(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-white focus:border-emerald-500 focus:outline-none mb-4"
                     autoFocus
+                    placeholder={modalType === 'compress' ? 'Archive name' : ''}
                     onKeyDown={(e) => e.key === 'Enter' && executeModalAction()}
                   />
                   <div className="flex justify-end gap-2">
                       <Button variant="ghost" onClick={() => setModalType(null)}>Cancel</Button>
                       <Button onClick={executeModalAction} isLoading={isLoading}>
-                          {modalType === 'rename' ? 'Rename' : modalType === 'permissions' ? 'Apply' : 'Create'}
+                          {modalType === 'rename' ? 'Rename' : modalType === 'permissions' ? 'Apply' : modalType === 'compress' ? 'Compress' : 'Create'}
                       </Button>
                   </div>
               </div>
