@@ -573,7 +573,7 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
                     <div className="my-1 border-t border-slate-700"/>
                     
                     <button onClick={() => { setModalType('createFolder'); setModalInput(''); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><FolderPlus className="w-4 h-4"/> New Folder</button>
-                    <button onClick={() => { setModalType('createFile'); setModalInput(''); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><FilePlus className="w-4 h-4"/> New File</Button>
+                    <button onClick={() => { setModalType('createFile'); setModalInput(''); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><FilePlus className="w-4 h-4"/> New File</button>
                     
                     {clipboard && (
                         <>
