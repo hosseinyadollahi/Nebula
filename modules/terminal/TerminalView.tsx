@@ -2,15 +2,17 @@ import React, { useEffect, useRef } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { SSHConnectionConfig } from '../../types';
+import { FolderOpen } from 'lucide-react';
 
 interface TerminalViewProps {
   active: boolean;
   config: SSHConnectionConfig | null;
   socket: WebSocket | null;
   onDisconnect: () => void;
+  onOpenScp: () => void;
 }
 
-// Professional Nebula Theme Palette (Optimized for xterm-256color)
+// Professional Nebula Theme Palette
 const NEBULA_THEME = {
   background: '#020617', // Slate 950
   foreground: '#e2e8f0', // Slate 200
@@ -46,7 +48,7 @@ const WELCOME_BANNER = `
 \x1b[0;90m      SECURE WEB TERMINAL v2.0                      \x1b[0m
 \r\n`;
 
-export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, socket, onDisconnect }) => {
+export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, socket, onDisconnect, onOpenScp }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -74,28 +76,28 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, sock
     term.loadAddon(fitAddon);
     term.open(terminalRef.current);
     
-    // Initial Fit
-    requestAnimationFrame(() => fitAddon.fit());
-
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    // Fix Glitch: Wait for fonts to be ready before first fit
+    document.fonts.ready.then(() => {
+      fitAddon.fit();
+      term.refresh(0, term.rows - 1);
+    });
 
     // Write banner
     term.write(WELCOME_BANNER);
     term.writeln(`\x1b[38;5;240m[SYSTEM] Session active: ${config?.username}@${config?.host}\x1b[0m\r\n`);
 
-    // Setup Resize Observer for the container
-    // This fixes the glitch where terminal renders weirdly if container is hidden/small initially
     const resizeObserver = new ResizeObserver(() => {
-      if (active) {
-        requestAnimationFrame(() => {
-          fitAddon.fit();
-          // Inform server of new size
-          if (socket && socket.readyState === WebSocket.OPEN) {
-             socket.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
-          }
-        });
-      }
+       if(active) {
+           requestAnimationFrame(() => {
+               fitAddon.fit();
+               if (socket && socket.readyState === WebSocket.OPEN) {
+                   socket.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
+               }
+           });
+       }
     });
     
     resizeObserver.observe(terminalRef.current);
@@ -122,20 +124,11 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, sock
         term.writeln('\r\n\x1b[1;31m[!] WebSocket Closed.\x1b[0m');
       };
 
-      // Send Input
       term.onData((data) => {
         if (socket.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify({ type: 'TERM_INPUT', data }));
         }
       });
-      
-      // Initial resize sync
-      setTimeout(() => {
-        fitAddon.fit();
-        if(socket.readyState === WebSocket.OPEN) {
-          socket.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
-        }
-      }, 100);
     }
 
     return () => {
@@ -143,21 +136,32 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, sock
       term.dispose();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket]); // Re-run if socket changes (initial connection)
+  }, [socket]);
 
   // Handle Tab Switching visibility fix
   useEffect(() => {
-    if (active && fitAddonRef.current) {
+    if (active && fitAddonRef.current && xtermRef.current) {
       setTimeout(() => {
         fitAddonRef.current?.fit();
         xtermRef.current?.focus();
-      }, 50);
+        xtermRef.current?.refresh(0, xtermRef.current.rows - 1);
+      }, 100);
     }
   }, [active]);
 
   return (
     <div className={`h-full w-full bg-slate-950 p-4 ${active ? 'block' : 'hidden'}`}>
-      <div className="h-full w-full relative">
+      <div className="h-full w-full relative group">
+        
+        {/* Floating SCP Button */}
+        <button 
+          onClick={onOpenScp}
+          className="absolute right-6 top-6 z-20 flex items-center gap-2 bg-slate-800/80 hover:bg-emerald-600 text-slate-300 hover:text-white px-3 py-2 rounded-lg border border-slate-700 backdrop-blur-sm transition-all shadow-lg opacity-0 group-hover:opacity-100 translate-y-2 group-hover:translate-y-0"
+        >
+          <FolderOpen className="w-4 h-4" />
+          <span className="text-xs font-medium">Open File Manager</span>
+        </button>
+
         <div 
           ref={terminalRef} 
           className="relative h-full w-full rounded-lg overflow-hidden bg-[#020617] border border-slate-800 shadow-xl"

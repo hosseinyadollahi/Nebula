@@ -23,29 +23,22 @@ function App() {
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
-      // Step 1: Send credentials immediately
       ws.send(JSON.stringify({ type: 'CONNECT', config }));
     };
 
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data);
-        
-        // Step 2: Listen for initial connection status
         if (msg.type === 'STATUS' && msg.status === 'CONNECTED') {
-          // Auth Successful
           setSocket(ws);
           setStatus(ConnectionStatus.CONNECTED);
-          // Remove this temporary listener so TerminalView can take over
           ws.onmessage = null; 
         } else if (msg.type === 'ERROR' || (msg.type === 'STATUS' && msg.status === 'DISCONNECTED')) {
-          // Auth Failed
-          setAuthError(msg.message || 'Authentication failed or connection refused.');
+          setAuthError(msg.message || 'Authentication failed.');
           setStatus(ConnectionStatus.DISCONNECTED);
           ws.close();
         }
       } catch (e) {
-        console.error("Auth handshake error", e);
         setAuthError("Invalid server response.");
         setStatus(ConnectionStatus.DISCONNECTED);
         ws.close();
@@ -55,13 +48,6 @@ function App() {
     ws.onerror = () => {
       setAuthError("WebSocket connection failed.");
       setStatus(ConnectionStatus.DISCONNECTED);
-    };
-
-    ws.onclose = () => {
-      if (status === ConnectionStatus.CONNECTING) {
-         // If closed while connecting, it's likely an auth failure handled above, 
-         // or a network drop.
-      }
     };
   };
 
@@ -78,7 +64,6 @@ function App() {
   if (status === ConnectionStatus.DISCONNECTED || status === ConnectionStatus.CONNECTING) {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-        {/* Decorative background elements */}
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
           <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/10 rounded-full blur-[100px]" />
           <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[100px]" />
@@ -160,6 +145,7 @@ function App() {
             config={activeConfig}
             socket={socket}
             onDisconnect={handleDisconnect}
+            onOpenScp={() => setActiveTab(TabView.SCP)}
           />
           <ScpManager 
             active={activeTab === TabView.SCP} 

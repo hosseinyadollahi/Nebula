@@ -29,6 +29,18 @@ export const setupWebSocket = (server) => {
           case 'SFTP_LIST':
              if (sshSession) sshSession.listFiles(msg.path);
              break;
+          
+          case 'SFTP_READ_FILE':
+             if (sshSession) sshSession.readFile(msg.path);
+             break;
+
+          case 'SFTP_SAVE_FILE':
+             if (sshSession) sshSession.saveFile(msg.path, msg.content);
+             break;
+
+          case 'SFTP_UPLOAD':
+             if (sshSession) sshSession.uploadFile(msg.path, msg.filename, msg.content);
+             break;
 
           case 'DISCONNECT':
             if (sshSession) sshSession.disconnect();

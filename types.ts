@@ -37,6 +37,13 @@ export enum TabView {
   SETTINGS = 'SETTINGS',
 }
 
+export interface TransferStatus {
+  type: 'upload' | 'download';
+  filename: string;
+  progress: number; // 0 to 100
+  isActive: boolean;
+}
+
 // Log entry for the console/debug
 export interface SystemLog {
   id: string;

@@ -13,8 +13,6 @@ export class SSHSession {
     this.conn.on('ready', () => {
       this.socket.send(JSON.stringify({ type: 'STATUS', status: 'CONNECTED' }));
       
-      // Default window size, will be updated by client resize event immediately
-      // CRITICAL: term: 'xterm-256color' enables colors in bash/zsh/vim etc.
       const ptyConfig = {
         rows: 24,
         cols: 80,
@@ -23,7 +21,6 @@ export class SSHSession {
         term: 'xterm-256color' 
       };
 
-      // Initialize Shell
       this.conn.shell(ptyConfig, (err, stream) => {
         if (err) {
           this.socket.send(JSON.stringify({ type: 'ERROR', message: 'Shell Error: ' + err.message }));
@@ -32,7 +29,6 @@ export class SSHSession {
         
         this.stream = stream;
 
-        // Data from Server -> Client (Terminal)
         stream.on('data', (data) => {
           this.socket.send(JSON.stringify({ type: 'TERM_DATA', data: data.toString('utf-8') }));
         });
@@ -43,7 +39,6 @@ export class SSHSession {
         });
       });
 
-      // Initialize SFTP
       this.conn.sftp((err, sftp) => {
         if (err) {
             console.error('SFTP Error:', err);
@@ -61,9 +56,7 @@ export class SSHSession {
       port: this.config.port,
       username: this.config.username,
       password: this.config.password,
-      // In production, handle private keys and better security options
       readyTimeout: 20000,
-      // Keepalive prevents connection drop on idle
       keepaliveInterval: 10000,
     });
   }
@@ -93,7 +86,7 @@ export class SSHSession {
         name: item.filename,
         isDirectory: item.longname.startsWith('d'),
         size: item.attrs.size,
-        permissions: item.longname.split(' ')[0], // simple parsing
+        permissions: item.longname.split(' ')[0],
         modifiedDate: new Date(item.attrs.mtime * 1000).toISOString(),
         path: path === '/' ? `/${item.filename}` : `${path}/${item.filename}`
       }));
@@ -103,6 +96,57 @@ export class SSHSession {
         path: path, 
         files: files 
       }));
+    });
+  }
+
+  readFile(path) {
+    if (!this.sftp) return;
+
+    // Limit file size check (e.g., 1MB for editor) can be added here
+    this.sftp.readFile(path, (err, buffer) => {
+      if (err) {
+        this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Read Failed: ' + err.message }));
+        return;
+      }
+      this.socket.send(JSON.stringify({
+        type: 'SFTP_FILE_CONTENT',
+        path: path,
+        content: buffer.toString('utf-8') // Assuming text file for editor
+      }));
+    });
+  }
+
+  saveFile(path, content) {
+    if (!this.sftp) return;
+
+    this.sftp.writeFile(path, content, (err) => {
+      if (err) {
+        this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Save Failed: ' + err.message }));
+        return;
+      }
+      this.socket.send(JSON.stringify({ type: 'SFTP_SAVED', path: path }));
+    });
+  }
+
+  // Simplified upload simulation for prototype
+  // In a real app, you'd use binary streams or fastPut with path
+  uploadFile(path, filename, contentBase64) {
+    if (!this.sftp) return;
+    
+    const buffer = Buffer.from(contentBase64, 'base64');
+    const fullPath = path === '/' ? `/${filename}` : `${path}/${filename}`;
+    
+    // Simulate progress
+    this.socket.send(JSON.stringify({ type: 'TRANSFER_PROGRESS', kind: 'upload', filename, percent: 10 }));
+    
+    this.sftp.writeFile(fullPath, buffer, (err) => {
+        if (err) {
+            this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Upload Failed: ' + err.message }));
+        } else {
+            this.socket.send(JSON.stringify({ type: 'TRANSFER_PROGRESS', kind: 'upload', filename, percent: 100 }));
+            // Refresh list
+            this.listFiles(path);
+        }
     });
   }
 
