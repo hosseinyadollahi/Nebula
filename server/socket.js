@@ -31,11 +31,25 @@ export const setupWebSocket = (server) => {
              break;
           
           case 'SFTP_READ_FILE':
-             if (sshSession) sshSession.readFile(msg.path);
+             // Can be used for edit (text) or download (base64)
+             if (sshSession) sshSession.readFile(msg.path, msg.isDownload);
              break;
 
           case 'SFTP_SAVE_FILE':
              if (sshSession) sshSession.saveFile(msg.path, msg.content);
+             break;
+
+          case 'SFTP_MKDIR':
+             if (sshSession) sshSession.createDir(msg.path);
+             break;
+
+          case 'SFTP_DELETE':
+             if (sshSession) sshSession.deleteEntry(msg.path);
+             break;
+          
+          case 'SFTP_EXEC':
+             // Used for zip/unzip
+             if (sshSession) sshSession.execCommand(msg.command);
              break;
 
           case 'SFTP_UPLOAD':

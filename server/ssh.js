@@ -73,6 +73,8 @@ export class SSHSession {
     }
   }
 
+  // --- SFTP Operations ---
+
   listFiles(path) {
     if (!this.sftp) return;
     
@@ -99,19 +101,23 @@ export class SSHSession {
     });
   }
 
-  readFile(path) {
+  readFile(path, isDownload = false) {
     if (!this.sftp) return;
 
-    // Limit file size check (e.g., 1MB for editor) can be added here
     this.sftp.readFile(path, (err, buffer) => {
       if (err) {
         this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Read Failed: ' + err.message }));
         return;
       }
+      
+      // Determine filename from path
+      const filename = path.split('/').pop();
+
       this.socket.send(JSON.stringify({
-        type: 'SFTP_FILE_CONTENT',
+        type: isDownload ? 'SFTP_DOWNLOAD_READY' : 'SFTP_FILE_CONTENT',
         path: path,
-        content: buffer.toString('utf-8') // Assuming text file for editor
+        filename: filename,
+        content: buffer.toString(isDownload ? 'base64' : 'utf-8') 
       }));
     });
   }
@@ -128,15 +134,41 @@ export class SSHSession {
     });
   }
 
-  // Simplified upload simulation for prototype
-  // In a real app, you'd use binary streams or fastPut with path
+  createDir(path) {
+    if (!this.sftp) return;
+    this.sftp.mkdir(path, (err) => {
+      if (err) {
+        this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Mkdir Failed: ' + err.message }));
+        return;
+      }
+      this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Directory created', action: 'mkdir' }));
+    });
+  }
+
+  deleteEntry(path) {
+     if (!this.sftp) return;
+     // Try unlink (file), if fails try rmdir (folder)
+     this.sftp.unlink(path, (err) => {
+         if (err) {
+             this.sftp.rmdir(path, (err2) => {
+                 if(err2) {
+                    this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Delete Failed: ' + err2.message }));
+                 } else {
+                    this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Deleted successfully', action: 'delete' }));
+                 }
+             });
+         } else {
+             this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Deleted successfully', action: 'delete' }));
+         }
+     });
+  }
+
   uploadFile(path, filename, contentBase64) {
     if (!this.sftp) return;
     
     const buffer = Buffer.from(contentBase64, 'base64');
     const fullPath = path === '/' ? `/${filename}` : `${path}/${filename}`;
     
-    // Simulate progress
     this.socket.send(JSON.stringify({ type: 'TRANSFER_PROGRESS', kind: 'upload', filename, percent: 10 }));
     
     this.sftp.writeFile(fullPath, buffer, (err) => {
@@ -144,9 +176,28 @@ export class SSHSession {
             this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Upload Failed: ' + err.message }));
         } else {
             this.socket.send(JSON.stringify({ type: 'TRANSFER_PROGRESS', kind: 'upload', filename, percent: 100 }));
-            // Refresh list
-            this.listFiles(path);
         }
+    });
+  }
+
+  // Execute a raw command (used for zip/unzip)
+  execCommand(command) {
+    this.conn.exec(command, (err, stream) => {
+        if (err) {
+            this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Exec error: ' + err.message }));
+            return;
+        }
+        stream.on('close', (code, signal) => {
+            if (code === 0) {
+                 this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Command executed', action: 'exec' }));
+            } else {
+                 this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: `Command failed with code ${code}` }));
+            }
+        }).on('data', (data) => {
+            // output ignored for now
+        }).stderr.on('data', (data) => {
+            // stderr ignored for now
+        });
     });
   }
 
