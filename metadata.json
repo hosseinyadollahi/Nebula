@@ -1,0 +1,5 @@
+{
+  "name": "Nebula SSH & SCP",
+  "description": "A modern, secure, and modular Web-based SSH client with integrated SCP file transfer capabilities.",
+  "requestFramePermissions": []
+}
