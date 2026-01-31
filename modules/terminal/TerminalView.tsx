@@ -1,17 +1,19 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { Terminal } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
-import { mockFS } from '../../services/mockBackend';
+import { SSHConnectionConfig } from '../../types';
 
 interface TerminalViewProps {
   active: boolean;
+  config: SSHConnectionConfig | null;
+  onSocketReady: (ws: WebSocket) => void;
 }
 
-export const TerminalView: React.FC<TerminalViewProps> = ({ active }) => {
+export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSocketReady }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const [inputBuffer, setInputBuffer] = useState('');
+  const socketRef = useRef<WebSocket | null>(null);
 
   // Initialize Terminal
   useEffect(() => {
@@ -22,9 +24,9 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active }) => {
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
       fontSize: 14,
       theme: {
-        background: '#0f172a', // Slate 950
-        foreground: '#e2e8f0', // Slate 200
-        cursor: '#10b981',     // Emerald 500
+        background: '#0f172a',
+        foreground: '#e2e8f0',
+        cursor: '#10b981',
         selectionBackground: 'rgba(16, 185, 129, 0.3)',
         black: '#000000',
         red: '#ef4444',
@@ -47,49 +49,75 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active }) => {
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Welcome Message
-    term.writeln('\x1b[1;32mWelcome to Nebula SSH Client v1.0.0\x1b[0m');
-    term.writeln('Connected to \x1b[1;34mmock-server-01\x1b[0m (Simulation Mode)');
-    term.writeln('Type \x1b[33mhelp\x1b[0m for available commands.\r\n');
-    prompt(term);
+    term.writeln('\x1b[1;34mConnecting to server...\x1b[0m');
 
-    // Key Handler
-    term.onKey(({ key, domEvent }) => {
-      const charCode = domEvent.keyCode;
-      
-      if (charCode === 13) { // Enter
-        term.write('\r\n');
-        handleCommand(term, inputBuffer); // We need to access the buffer from state ref if using hooks, but simpler to use a variable for this closures
-      } else if (charCode === 8) { // Backspace
-        if (inputBuffer.length > 0) {
-           term.write('\b \b');
-           setInputBuffer(prev => prev.slice(0, -1));
+    // Establish WebSocket Connection
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      // Send connection credentials
+      if (config) {
+        ws.send(JSON.stringify({ type: 'CONNECT', config }));
+      }
+      onSocketReady(ws);
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg.type === 'TERM_DATA') {
+          term.write(msg.data);
+        } else if (msg.type === 'STATUS') {
+          if (msg.status === 'CONNECTED') {
+             term.writeln('\r\n\x1b[1;32mConnection Established.\x1b[0m\r\n');
+             // Trigger resize on connect
+             fitAddon.fit();
+             ws.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
+          } else if (msg.status === 'DISCONNECTED') {
+             term.writeln('\r\n\x1b[1;31mConnection Closed.\x1b[0m');
+          }
+        } else if (msg.type === 'ERROR') {
+          term.writeln(`\r\n\x1b[1;31mError: ${msg.message}\x1b[0m`);
         }
-      } else if (charCode >= 32 && charCode <= 126) { // Printable
-         term.write(key);
-         setInputBuffer(prev => prev + key);
+      } catch (e) {
+        // Raw data fallback
+        console.error(e);
+      }
+    };
+
+    ws.onerror = () => {
+      term.writeln('\r\n\x1b[1;31mWebSocket Connection Error.\x1b[0m');
+    };
+
+    socketRef.current = ws;
+
+    // Send Terminal Input to Server
+    term.onData((data) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'TERM_INPUT', data }));
       }
     });
 
-    // Cleanup
-    return () => {
-      term.dispose();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Handle Resize
-  useEffect(() => {
+    // Handle Resize
     const handleResize = () => {
-      fitAddonRef.current?.fit();
+        fitAddon.fit();
+        if (ws.readyState === WebSocket.OPEN && term) {
+          ws.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
+        }
     };
     window.addEventListener('resize', handleResize);
-    // Initial fit after a small delay to ensure container is rendered
-    setTimeout(() => handleResize, 100);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
-  // Handle Active Tab Switch - Refit needed when container becomes visible
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      term.dispose();
+      ws.close();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [config]);
+
+  // Handle Active Tab Switch
   useEffect(() => {
     if (active && fitAddonRef.current) {
       requestAnimationFrame(() => {
@@ -98,69 +126,6 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active }) => {
       });
     }
   }, [active]);
-
-  // Command Processor (Mock)
-  // Note: In a real app, this sends data to WebSocket
-  // Here we update a ref or use the closure's state if we can. 
-  // IMPORTANT: The `onKey` closure captures the initial `inputBuffer` state if not careful.
-  // To fix the closure issue in `useEffect`, we need a mutable ref for the buffer.
-  const bufferRef = useRef('');
-  
-  useEffect(() => {
-    bufferRef.current = inputBuffer;
-  }, [inputBuffer]);
-
-  const prompt = (term: Terminal) => {
-    const cwd = mockFS.getCwd();
-    term.write(`\x1b[1;32mroot@nebula\x1b[0m:\x1b[1;34m${cwd}\x1b[0m$ `);
-  };
-
-  const handleCommand = (term: Terminal, cmd: string) => {
-    // Use the ref value for the actual execution context
-    const command = bufferRef.current.trim();
-    
-    if (command) {
-      const parts = command.split(' ');
-      const base = parts[0];
-      const args = parts.slice(1);
-
-      switch (base) {
-        case 'help':
-          term.writeln('Available commands: \x1b[33mls, cd, pwd, cat, echo, clear, whoami\x1b[0m');
-          term.writeln('Use the \x1b[36mSCP\x1b[0m tab to transfer files.');
-          break;
-        case 'clear':
-          term.clear();
-          break;
-        case 'ls':
-          const files = mockFS.listFiles();
-          files.forEach(f => {
-            const color = f.isDirectory ? '\x1b[1;34m' : '\x1b[37m';
-            term.writeln(`${f.permissions}  root  root  ${f.size.toString().padStart(6)}  ${f.modifiedDate.substring(0, 10)}  ${color}${f.name}\x1b[0m`);
-          });
-          break;
-        case 'pwd':
-          term.writeln(mockFS.getCwd());
-          break;
-        case 'cd':
-          const err = mockFS.changeDir(args[0] || '~');
-          if (err) term.writeln(`\x1b[31m${err}\x1b[0m`);
-          break;
-        case 'whoami':
-          term.writeln('root');
-          break;
-        case 'echo':
-          term.writeln(args.join(' '));
-          break;
-        default:
-          term.writeln(`\x1b[31mcommand not found: ${base}\x1b[0m`);
-      }
-    }
-    
-    setInputBuffer('');
-    bufferRef.current = '';
-    prompt(term);
-  };
 
   return (
     <div className={`h-full w-full bg-slate-950 p-2 ${active ? 'block' : 'hidden'}`}>

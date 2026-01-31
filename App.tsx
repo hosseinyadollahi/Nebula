@@ -10,38 +10,51 @@ function App() {
   const [status, setStatus] = useState<ConnectionStatus>(ConnectionStatus.DISCONNECTED);
   const [activeTab, setActiveTab] = useState<TabView>(TabView.TERMINAL);
   const [activeConfig, setActiveConfig] = useState<SSHConnectionConfig | null>(null);
+  const [socket, setSocket] = useState<WebSocket | null>(null);
 
   const handleConnect = (config: SSHConnectionConfig) => {
     setStatus(ConnectionStatus.CONNECTING);
-    // Simulate connection delay
-    setTimeout(() => {
-      setActiveConfig(config);
-      setStatus(ConnectionStatus.CONNECTED);
-    }, 1500);
+    setActiveConfig(config);
+    // The actual socket connection happens inside TerminalView when config is set
+  };
+
+  const handleSocketReady = (ws: WebSocket) => {
+    setSocket(ws);
+    setStatus(ConnectionStatus.CONNECTED);
   };
 
   const handleDisconnect = () => {
     setStatus(ConnectionStatus.DISCONNECTED);
     setActiveConfig(null);
+    if (socket) {
+        socket.close();
+        setSocket(null);
+    }
   };
 
-  if (status !== ConnectionStatus.CONNECTED) {
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-        {/* Decorative background elements */}
-        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/10 rounded-full blur-[100px]" />
-          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[100px]" />
+  if (status === ConnectionStatus.DISCONNECTED || status === ConnectionStatus.CONNECTING) {
+    // Note: We show the form even during CONNECTING, TerminalView handles the logic in background if we wanted, 
+    // but here we keep the UI simple. To actually start the terminal, we need to transition.
+    // For this implementation, we simply render the main view immediately if config is set, 
+    // letting TerminalView handle the "Connecting..." state visually.
+    if (!activeConfig) {
+      return (
+        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+          {/* Decorative background elements */}
+          <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/10 rounded-full blur-[100px]" />
+            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[100px]" />
+          </div>
+          
+          <ConnectionForm onConnect={handleConnect} isLoading={false} />
+          
+          <div className="mt-8 flex items-center gap-2 text-emerald-500/50 text-xs uppercase tracking-widest font-bold">
+             <ShieldCheck className="w-4 h-4" />
+             <span>Secure WebSocket Tunnel</span>
+          </div>
         </div>
-        
-        <ConnectionForm onConnect={handleConnect} isLoading={status === ConnectionStatus.CONNECTING} />
-        
-        <div className="mt-8 flex items-center gap-2 text-emerald-500/50 text-xs uppercase tracking-widest font-bold">
-           <ShieldCheck className="w-4 h-4" />
-           <span>End-to-End Encrypted Simulation</span>
-        </div>
-      </div>
-    );
+      );
+    }
   }
 
   return (
@@ -89,20 +102,27 @@ function App() {
         {/* Header Bar */}
         <header className="h-12 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-6 backdrop-blur-sm">
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <div className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-emerald-500 animate-pulse' : 'bg-yellow-500'}`} />
             <span className="text-sm font-medium text-slate-300">
               {activeConfig?.username}@{activeConfig?.host}
             </span>
           </div>
           <div className="text-xs text-slate-500 font-mono">
-            {activeTab === TabView.TERMINAL ? 'SSH-2.0-OpenSSH_8.9' : 'SFTP Protocol v3'}
+            {activeTab === TabView.TERMINAL ? 'SSH-2.0 via WebSocket' : 'SFTP Subsystem'}
           </div>
         </header>
 
         {/* View Viewport */}
         <div className="flex-1 relative overflow-hidden">
-          <TerminalView active={activeTab === TabView.TERMINAL} />
-          <ScpManager active={activeTab === TabView.SCP} />
+          <TerminalView 
+            active={activeTab === TabView.TERMINAL} 
+            config={activeConfig}
+            onSocketReady={handleSocketReady}
+          />
+          <ScpManager 
+            active={activeTab === TabView.SCP} 
+            socket={socket}
+          />
         </div>
       </main>
     </div>
