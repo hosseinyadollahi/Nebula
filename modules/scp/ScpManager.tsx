@@ -6,7 +6,7 @@ import {
   Download, Trash2, FolderPlus, FilePlus, Archive, 
   LayoutGrid, List as ListIcon, MoreHorizontal,
   ChevronRight, HardDrive, Shield, Type, FileImage, FileArchive,
-  AlertTriangle, Copy, Scissors, Clipboard
+  AlertTriangle, Copy, Scissors, Clipboard, MousePointer2
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 
@@ -61,7 +61,9 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
   const [clipboard, setClipboard] = useState<{file: FileEntry, mode: 'copy' | 'cut'} | null>(null);
 
   // Actions / Modals
-  const [contextMenu, setContextMenu] = useState<{x: number, y: number, file: FileEntry} | null>(null);
+  // Modified contextMenu type to allow null file (background click)
+  const [contextMenu, setContextMenu] = useState<{x: number, y: number, file: FileEntry | null} | null>(null);
+  
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorContent, setEditorContent] = useState('');
   const [editingFile, setEditingFile] = useState<FileEntry | null>(null);
@@ -205,10 +207,21 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
       document.body.removeChild(link);
   };
 
+  // Specific File Context Menu
   const handleContextMenu = (e: React.MouseEvent, file: FileEntry) => {
       e.preventDefault();
+      e.stopPropagation(); // Stop bubbling to background
       setContextMenu({ x: e.clientX, y: e.clientY, file });
       setSelectedFile(file);
+  };
+
+  // Background Context Menu (Empty Space)
+  const handleBackgroundContextMenu = (e: React.MouseEvent) => {
+      e.preventDefault();
+      if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.file-item') === null) {
+        setContextMenu({ x: e.clientX, y: e.clientY, file: null });
+        setSelectedFile(null);
+      }
   };
 
   // --- Clipboard Handlers ---
@@ -420,8 +433,8 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
                 })}
             </div>
 
-            {/* Content */}
-            <div className="flex-1 overflow-y-auto p-4" onContextMenu={e => e.preventDefault()}>
+            {/* Content (with Background Context Menu) */}
+            <div className="flex-1 overflow-y-auto p-4" onContextMenu={handleBackgroundContextMenu}>
                 {/* Upload Progress */}
                 {transfer.isActive && (
                     <div className="mb-4 bg-slate-800 rounded border border-slate-700 p-3 flex items-center gap-3 animate-pulse">
@@ -438,7 +451,7 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
 
                 {/* Empty State */}
                 {sortedFiles.length === 0 && !isLoading && (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-50">
+                    <div className="h-full flex flex-col items-center justify-center text-slate-600 opacity-50 pointer-events-none">
                         <Folder className="w-16 h-16 mb-2"/>
                         <span className="text-lg font-medium">Empty Directory</span>
                     </div>
@@ -452,8 +465,8 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
                                 key={i}
                                 onDoubleClick={() => handleFileAction(file)}
                                 onContextMenu={(e) => handleContextMenu(e, file)}
-                                onClick={() => setSelectedFile(file)}
-                                className={`group flex flex-col items-center p-3 rounded-xl transition-all border ${selectedFile?.name === file.name ? 'bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-slate-900/40 border-slate-800 hover:bg-slate-800 hover:border-slate-700'}`}
+                                onClick={(e) => { e.stopPropagation(); setSelectedFile(file); }}
+                                className={`file-item group flex flex-col items-center p-3 rounded-xl transition-all border ${selectedFile?.name === file.name ? 'bg-emerald-500/20 border-emerald-500/50 shadow-[0_0_15px_rgba(16,185,129,0.1)]' : 'bg-slate-900/40 border-slate-800 hover:bg-slate-800 hover:border-slate-700'}`}
                             >
                                 <div className="mb-3 transition-transform group-hover:scale-110 duration-200">
                                     <FileIcon name={file.name} isDirectory={file.isDirectory} size="lg"/>
@@ -468,7 +481,7 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
                 {/* LIST VIEW */}
                 {viewMode === 'list' && (
                     <table className="w-full text-left text-sm">
-                        <thead className="text-xs text-slate-500 uppercase bg-slate-900/50 sticky top-0">
+                        <thead className="text-xs text-slate-500 uppercase bg-slate-900/50 sticky top-0 z-10">
                             <tr>
                                 <th className="px-4 py-3 font-medium cursor-pointer" onClick={() => { setSortField('name'); setSortDir(sortDir==='asc'?'desc':'asc')}}>Name</th>
                                 <th className="px-4 py-3 font-medium w-32 cursor-pointer" onClick={() => { setSortField('size'); setSortDir(sortDir==='asc'?'desc':'asc')}}>Size</th>
@@ -483,8 +496,8 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
                                     key={i} 
                                     onDoubleClick={() => handleFileAction(file)}
                                     onContextMenu={(e) => handleContextMenu(e, file)}
-                                    onClick={() => setSelectedFile(file)}
-                                    className={`group cursor-pointer transition-colors ${selectedFile?.name === file.name ? 'bg-emerald-500/10' : 'hover:bg-slate-900/60'}`}
+                                    onClick={(e) => { e.stopPropagation(); setSelectedFile(file); }}
+                                    className={`file-item group cursor-pointer transition-colors ${selectedFile?.name === file.name ? 'bg-emerald-500/10' : 'hover:bg-slate-900/60'}`}
                                 >
                                     <td className="px-4 py-2 flex items-center gap-3">
                                         <FileIcon name={file.name} isDirectory={file.isDirectory}/>
@@ -504,7 +517,7 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
             </div>
 
             {/* Status Bar */}
-            <div className="h-8 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-4 text-[10px] text-slate-500 font-mono">
+            <div className="h-8 bg-slate-900 border-t border-slate-800 flex items-center justify-between px-4 text-[10px] text-slate-500 font-mono z-20">
                 <div>{sortedFiles.length} items  |  Total size: {(sortedFiles.reduce((acc, curr) => acc + curr.size, 0) / 1024 / 1024).toFixed(2)} MB</div>
                 <div>{selectedFile ? `Selected: ${selectedFile.name}` : 'Ready'}</div>
             </div>
@@ -518,36 +531,61 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
             className="fixed z-50 bg-slate-800 border border-slate-700 shadow-2xl rounded-lg py-1 w-48 animate-in fade-in zoom-in-95 duration-100"
             style={{ top: contextMenu.y, left: contextMenu.x }}
           >
-              <div className="px-3 py-2 border-b border-slate-700 mb-1">
-                  <div className="font-bold text-slate-200 truncate">{contextMenu.file.name}</div>
-                  <div className="text-xs text-slate-500">{contextMenu.file.isDirectory ? 'Directory' : 'File'}</div>
-              </div>
-              
-              {!contextMenu.file.isDirectory && (
-                  <button onClick={() => { handleEdit(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-emerald-600/20 hover:text-emerald-400 flex items-center gap-2 text-sm"><Edit3 className="w-4 h-4"/> Edit</button>
-              )}
-              
-              {/* Copy / Cut / Paste Section */}
-              <div className="my-1 border-t border-slate-700"/>
-              <button onClick={() => handleCopy(contextMenu.file)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Copy className="w-4 h-4"/> Copy</button>
-              <button onClick={() => handleCut(contextMenu.file)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Scissors className="w-4 h-4"/> Cut</button>
-              {clipboard && (
-                 <button onClick={handlePaste} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm text-emerald-400"><Clipboard className="w-4 h-4"/> Paste</button>
-              )}
-              <div className="my-1 border-t border-slate-700"/>
+              {contextMenu.file ? (
+                  // FILE SPECIFIC CONTEXT MENU
+                  <>
+                    <div className="px-3 py-2 border-b border-slate-700 mb-1">
+                        <div className="font-bold text-slate-200 truncate">{contextMenu.file.name}</div>
+                        <div className="text-xs text-slate-500">{contextMenu.file.isDirectory ? 'Directory' : 'File'}</div>
+                    </div>
+                    
+                    {!contextMenu.file.isDirectory && (
+                        <button onClick={() => { handleEdit(contextMenu.file!); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-emerald-600/20 hover:text-emerald-400 flex items-center gap-2 text-sm"><Edit3 className="w-4 h-4"/> Edit</button>
+                    )}
+                    
+                    <div className="my-1 border-t border-slate-700"/>
+                    <button onClick={() => handleCopy(contextMenu.file!)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Copy className="w-4 h-4"/> Copy</button>
+                    <button onClick={() => handleCut(contextMenu.file!)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Scissors className="w-4 h-4"/> Cut</button>
+                    <div className="my-1 border-t border-slate-700"/>
 
-              <button onClick={() => { setModalType('rename'); setModalInput(contextMenu.file.name); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Type className="w-4 h-4"/> Rename</button>
-              <button onClick={() => { setModalType('permissions'); setModalInput('755'); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Shield className="w-4 h-4"/> Permissions</button>
-              <div className="my-1 border-t border-slate-700"/>
-              {!contextMenu.file.isDirectory && <button onClick={() => { handleDownload(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Download className="w-4 h-4"/> Download</button>}
-              
-              <button onClick={() => handleCompressRequest(contextMenu.file)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Archive className="w-4 h-4"/> Compress</button>
-              
-              {isArchive(contextMenu.file.name) && (
-                <button onClick={() => { handleExtract(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Archive className="w-4 h-4"/> Extract</button>
+                    <button onClick={() => { setModalType('rename'); setModalInput(contextMenu.file!.name); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Type className="w-4 h-4"/> Rename</button>
+                    <button onClick={() => { setModalType('permissions'); setModalInput('755'); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Shield className="w-4 h-4"/> Permissions</button>
+                    <div className="my-1 border-t border-slate-700"/>
+                    {!contextMenu.file.isDirectory && <button onClick={() => { handleDownload(contextMenu.file!); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Download className="w-4 h-4"/> Download</button>}
+                    
+                    <button onClick={() => handleCompressRequest(contextMenu.file!)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Archive className="w-4 h-4"/> Compress</button>
+                    
+                    {isArchive(contextMenu.file.name) && (
+                        <button onClick={() => { handleExtract(contextMenu.file!); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Archive className="w-4 h-4"/> Extract</button>
+                    )}
+                    
+                    <button onClick={() => { handleDelete(contextMenu.file!); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-red-900/30 text-red-400 flex items-center gap-2 text-sm"><Trash2 className="w-4 h-4"/> Delete</button>
+                  </>
+              ) : (
+                  // BACKGROUND CONTEXT MENU (No File Selected)
+                  <>
+                    <div className="px-3 py-2 border-b border-slate-700 mb-1">
+                        <div className="font-bold text-slate-200 truncate">Current Folder</div>
+                        <div className="text-xs text-slate-500 truncate" title={remotePath}>{remotePath}</div>
+                    </div>
+                    
+                    <button onClick={() => { refreshRemote(); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><RefreshCw className="w-4 h-4"/> Refresh</button>
+                    <div className="my-1 border-t border-slate-700"/>
+                    
+                    <button onClick={() => { setModalType('createFolder'); setModalInput(''); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><FolderPlus className="w-4 h-4"/> New Folder</button>
+                    <button onClick={() => { setModalType('createFile'); setModalInput(''); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><FilePlus className="w-4 h-4"/> New File</Button>
+                    
+                    {clipboard && (
+                        <>
+                            <div className="my-1 border-t border-slate-700"/>
+                            <button onClick={handlePaste} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm text-emerald-400"><Clipboard className="w-4 h-4"/> Paste Item</button>
+                        </>
+                    )}
+
+                    <div className="my-1 border-t border-slate-700"/>
+                    <button onClick={() => { fileInputRef.current?.click(); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><UploadCloud className="w-4 h-4"/> Upload File</button>
+                  </>
               )}
-              
-              <button onClick={() => { handleDelete(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-red-900/30 text-red-400 flex items-center gap-2 text-sm"><Trash2 className="w-4 h-4"/> Delete</button>
           </div>
       )}
 
