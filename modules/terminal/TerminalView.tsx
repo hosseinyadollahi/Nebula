@@ -9,15 +9,15 @@ interface TerminalViewProps {
   onSocketReady: (ws: WebSocket) => void;
 }
 
-// Professional Nebula Theme Palette
+// Professional Nebula Theme Palette (Optimized for xterm-256color)
 const NEBULA_THEME = {
-  background: '#020617', // Slate 950 (Deepest dark)
-  foreground: '#f8fafc', // Slate 50 (Bright white for text)
-  cursor: '#10b981',     // Emerald 500
-  cursorAccent: '#000000',
-  selectionBackground: 'rgba(16, 185, 129, 0.25)', // Transparent Emerald
+  background: '#020617', // Slate 950
+  foreground: '#e2e8f0', // Slate 200
+  cursor: '#22d3ee',     // Cyan 400 (Highly visible cursor)
+  cursorAccent: '#020617',
+  selectionBackground: 'rgba(34, 211, 238, 0.3)', // Transparent Cyan
   
-  // ANSI Colors
+  // ANSI Colors (Dracula-inspired adaptation for Slate bg)
   black: '#1e293b',      // Slate 800
   red: '#ef4444',        // Red 500
   green: '#10b981',      // Emerald 500
@@ -25,10 +25,10 @@ const NEBULA_THEME = {
   blue: '#3b82f6',       // Blue 500
   magenta: '#d946ef',    // Fuchsia 500
   cyan: '#06b6d4',       // Cyan 500
-  white: '#e2e8f0',      // Slate 200
+  white: '#f1f5f9',      // Slate 100
 
   // Bright Variants
-  brightBlack: '#475569', // Slate 600
+  brightBlack: '#64748b', // Slate 500
   brightRed: '#f87171',   // Red 400
   brightGreen: '#34d399', // Emerald 400
   brightYellow: '#fbbf24',// Amber 400
@@ -39,12 +39,12 @@ const NEBULA_THEME = {
 };
 
 const WELCOME_BANNER = `
-\x1b[1;32m  _   _      _           _        \x1b[0m
-\x1b[1;32m | \\ | | ___| |__  _   _| | __ _  \x1b[0m
-\x1b[1;32m |  \\| |/ _ \\ '_ \\| | | | |/ _\` | \x1b[0m
-\x1b[1;32m | |\\  |  __/ |_) | |_| | | (_| | \x1b[0m
-\x1b[1;32m |_| \\_|\\___|_.__/ \\__,_|_|\\__,_| \x1b[0m
-\x1b[1;36m      SSH CLIENT v1.0.0           \x1b[0m
+\x1b[1;36m  _   _      _           _         ____ ____  _   _ \x1b[0m
+\x1b[1;36m | \\ | | ___| |__  _   _| | __ _  / ___/ ___|| | | |\x1b[0m
+\x1b[1;36m |  \\| |/ _ \\ '_ \\| | | | |/ _\` | \\___ \\___ \\| |_| |\x1b[0m
+\x1b[1;36m | |\\  |  __/ |_) | |_| | | (_| |  ___) |__) |  _  |\x1b[0m
+\x1b[1;36m |_| \\_|\\___|_.__/ \\__,_|_|\\__,_| |____/____/|_| |_|\x1b[0m
+\x1b[0;90m      SECURE WEB TERMINAL v2.0                      \x1b[0m
 \r\n`;
 
 export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSocketReady }) => {
@@ -59,15 +59,17 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSo
 
     const term = new Terminal({
       cursorBlink: true,
-      cursorStyle: 'block', // 'block' | 'underline' | 'bar'
-      fontFamily: '"JetBrains Mono", "Fira Code", "Cascadia Code", monospace',
+      cursorStyle: 'bar', // 'block' | 'underline' | 'bar'
+      cursorWidth: 2,
+      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
       fontSize: 14,
-      lineHeight: 1.2, // Slightly taller lines for better readability
+      lineHeight: 1.25, 
       fontWeight: '500',
       letterSpacing: 0,
       theme: NEBULA_THEME,
       allowTransparency: true,
-      scrollback: 5000, // Increase scrollback buffer
+      scrollback: 10000,
+      rightClickSelectsWord: true,
     });
 
     const fitAddon = new FitAddon();
@@ -81,10 +83,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSo
 
     // Initial Welcome Message
     term.write(WELCOME_BANNER);
-    term.writeln('\x1b[38;5;240m----------------------------------------\x1b[0m');
-    term.writeln(`\x1b[1;34m[*] Target System:\x1b[0m ${config ? config.host : 'Not Configured'}`);
-    term.writeln('\x1b[1;34m[*] Status:\x1b[0m \x1b[33mInitializing connection...\x1b[0m');
-    term.writeln('');
+    term.writeln(`\x1b[38;5;240m[SYSTEM] Initializing secure connection to ${config?.host}...\x1b[0m`);
 
     // Establish WebSocket Connection
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -106,24 +105,23 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSo
           term.write(msg.data);
         } else if (msg.type === 'STATUS') {
           if (msg.status === 'CONNECTED') {
-             term.writeln('\r\n\x1b[1;32m[+] Connection Established Successfully.\x1b[0m\r\n');
-             // Trigger resize on connect
+             // We don't print "Connected" here to avoid cluttering the shell prompt
+             // The shell prompt itself is indication enough
              fitAddon.fit();
              ws.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
           } else if (msg.status === 'DISCONNECTED') {
-             term.writeln('\r\n\x1b[1;31m[-] Connection Closed.\x1b[0m');
+             term.writeln('\r\n\x1b[1;31m[!] Connection Terminated by Server.\x1b[0m');
           }
         } else if (msg.type === 'ERROR') {
           term.writeln(`\r\n\x1b[1;31m[!] Error: ${msg.message}\x1b[0m`);
         }
       } catch (e) {
-        // Raw data fallback
         console.error(e);
       }
     };
 
     ws.onerror = () => {
-      term.writeln('\r\n\x1b[1;31m[!] WebSocket Connection Error.\x1b[0m');
+      term.writeln('\r\n\x1b[1;31m[!] Fatal: WebSocket Connection Failed.\x1b[0m');
     };
 
     socketRef.current = ws;
@@ -155,25 +153,24 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSo
   // Handle Active Tab Switch
   useEffect(() => {
     if (active && fitAddonRef.current) {
-      requestAnimationFrame(() => {
+      // Small delay to ensure container is rendered
+      setTimeout(() => {
         fitAddonRef.current?.fit();
         xtermRef.current?.focus();
-      });
+      }, 50);
     }
   }, [active]);
 
   return (
     <div className={`h-full w-full bg-slate-950 p-4 ${active ? 'block' : 'hidden'}`}>
-      <div className="h-full w-full relative group">
-        {/* Glow Effect Background */}
-        <div className="absolute -inset-0.5 bg-gradient-to-r from-emerald-500/20 to-cyan-500/20 rounded-xl blur opacity-30 group-hover:opacity-50 transition duration-1000"></div>
-        
+      <div className="h-full w-full relative">
         {/* Terminal Container */}
         <div 
           ref={terminalRef} 
-          className="relative h-full w-full rounded-xl overflow-hidden bg-[#020617] border border-slate-800 shadow-2xl pl-2 pt-2"
+          className="relative h-full w-full rounded-lg overflow-hidden bg-[#020617] border border-slate-800 shadow-xl"
           style={{
-            boxShadow: 'inset 0 0 40px rgba(0,0,0,0.5)' // Inner shadow for depth
+            // Inner padding to keep text away from edges
+            padding: '12px 0 0 12px' 
           }}
         />
       </div>

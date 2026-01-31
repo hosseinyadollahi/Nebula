@@ -13,8 +13,18 @@ export class SSHSession {
     this.conn.on('ready', () => {
       this.socket.send(JSON.stringify({ type: 'STATUS', status: 'CONNECTED' }));
       
+      // Default window size, will be updated by client resize event immediately
+      // CRITICAL: term: 'xterm-256color' enables colors in bash/zsh/vim etc.
+      const ptyConfig = {
+        rows: 24,
+        cols: 80,
+        height: 480,
+        width: 640,
+        term: 'xterm-256color' 
+      };
+
       // Initialize Shell
-      this.conn.shell((err, stream) => {
+      this.conn.shell(ptyConfig, (err, stream) => {
         if (err) {
           this.socket.send(JSON.stringify({ type: 'ERROR', message: 'Shell Error: ' + err.message }));
           return;
@@ -53,6 +63,8 @@ export class SSHSession {
       password: this.config.password,
       // In production, handle private keys and better security options
       readyTimeout: 20000,
+      // Keepalive prevents connection drop on idle
+      keepaliveInterval: 10000,
     });
   }
 
