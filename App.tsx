@@ -18,8 +18,15 @@ function App() {
     setAuthError(null);
     setActiveConfig(config);
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
+    // Electron Support: If running from file://, assume localhost:8080 for backend
+    let wsUrl;
+    if (window.location.protocol === 'file:') {
+      wsUrl = 'ws://localhost:8080';
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      wsUrl = `${protocol}//${window.location.host}`;
+    }
+
     const ws = new WebSocket(wsUrl);
 
     ws.onopen = () => {
@@ -46,7 +53,7 @@ function App() {
     };
 
     ws.onerror = () => {
-      setAuthError("WebSocket connection failed.");
+      setAuthError("WebSocket connection failed. Ensure server is running.");
       setStatus(ConnectionStatus.DISCONNECTED);
     };
   };
@@ -126,7 +133,7 @@ function App() {
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col min-w-0 relative bg-slate-950">
         {/* Header Bar */}
-        <header className="h-12 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-6 backdrop-blur-sm">
+        <header className="h-12 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-6 backdrop-blur-sm app-drag-region">
           <div className="flex items-center gap-2">
             <div className={`w-2 h-2 rounded-full ${status === ConnectionStatus.CONNECTED ? 'bg-emerald-500 animate-pulse' : 'bg-yellow-500'}`} />
             <span className="text-sm font-medium text-slate-300">
