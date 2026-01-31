@@ -88,7 +88,8 @@ export class SSHSession {
         name: item.filename,
         isDirectory: item.longname.startsWith('d'),
         size: item.attrs.size,
-        permissions: item.longname.split(' ')[0],
+        permissions: item.longname.split(' ')[0], // ex: drwxr-xr-x
+        numericPermissions: '0' + (item.attrs.mode & 0o777).toString(8), // ex: 0755
         modifiedDate: new Date(item.attrs.mtime * 1000).toISOString(),
         path: path === '/' ? `/${item.filename}` : `${path}/${item.filename}`
       }));
@@ -110,7 +111,6 @@ export class SSHSession {
         return;
       }
       
-      // Determine filename from path
       const filename = path.split('/').pop();
 
       this.socket.send(JSON.stringify({
@@ -147,7 +147,6 @@ export class SSHSession {
 
   deleteEntry(path) {
      if (!this.sftp) return;
-     // Try unlink (file), if fails try rmdir (folder)
      this.sftp.unlink(path, (err) => {
          if (err) {
              this.sftp.rmdir(path, (err2) => {
@@ -161,6 +160,30 @@ export class SSHSession {
              this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Deleted successfully', action: 'delete' }));
          }
      });
+  }
+
+  renameEntry(oldPath, newPath) {
+    if (!this.sftp) return;
+    this.sftp.rename(oldPath, newPath, (err) => {
+        if (err) {
+            this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Rename Failed: ' + err.message }));
+        } else {
+            this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Renamed successfully', action: 'rename' }));
+        }
+    });
+  }
+
+  chmodEntry(path, mode) {
+    if (!this.sftp) return;
+    // mode should be an octal string e.g., "755" or number
+    const numericMode = parseInt(mode, 8);
+    this.sftp.chmod(path, numericMode, (err) => {
+        if (err) {
+            this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Chmod Failed: ' + err.message }));
+        } else {
+            this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Permissions changed', action: 'chmod' }));
+        }
+    });
   }
 
   uploadFile(path, filename, contentBase64) {
@@ -180,7 +203,6 @@ export class SSHSession {
     });
   }
 
-  // Execute a raw command (used for zip/unzip)
   execCommand(command) {
     this.conn.exec(command, (err, stream) => {
         if (err) {
@@ -193,10 +215,6 @@ export class SSHSession {
             } else {
                  this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: `Command failed with code ${code}` }));
             }
-        }).on('data', (data) => {
-            // output ignored for now
-        }).stderr.on('data', (data) => {
-            // stderr ignored for now
         });
     });
   }
