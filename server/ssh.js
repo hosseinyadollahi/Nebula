@@ -215,6 +215,10 @@ export class SSHSession {
             } else {
                  this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: `Command failed with code ${code}` }));
             }
+        }).on('data', (data) => {
+            // Consume stdout to prevent buffer full hang
+        }).stderr.on('data', (data) => {
+            // Consume stderr to prevent buffer full hang
         });
     });
   }

@@ -99,6 +99,9 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
             case 'SFTP_SAVED':
                 setIsSaving(false);
                 setEditorOpen(false);
+                // Also close create modal if open
+                setModalType(null);
+                setModalInput('');
                 refreshRemote(remotePath);
                 break;
             case 'SFTP_ACTION_SUCCESS':
