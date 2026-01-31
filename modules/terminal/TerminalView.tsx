@@ -6,36 +6,35 @@ import { SSHConnectionConfig } from '../../types';
 interface TerminalViewProps {
   active: boolean;
   config: SSHConnectionConfig | null;
-  onSocketReady: (ws: WebSocket) => void;
+  socket: WebSocket | null;
+  onDisconnect: () => void;
 }
 
 // Professional Nebula Theme Palette (Optimized for xterm-256color)
 const NEBULA_THEME = {
   background: '#020617', // Slate 950
   foreground: '#e2e8f0', // Slate 200
-  cursor: '#22d3ee',     // Cyan 400 (Highly visible cursor)
+  cursor: '#22d3ee',     // Cyan 400
   cursorAccent: '#020617',
-  selectionBackground: 'rgba(34, 211, 238, 0.3)', // Transparent Cyan
+  selectionBackground: 'rgba(34, 211, 238, 0.3)',
   
-  // ANSI Colors (Dracula-inspired adaptation for Slate bg)
-  black: '#1e293b',      // Slate 800
-  red: '#ef4444',        // Red 500
-  green: '#10b981',      // Emerald 500
-  yellow: '#f59e0b',     // Amber 500
-  blue: '#3b82f6',       // Blue 500
-  magenta: '#d946ef',    // Fuchsia 500
-  cyan: '#06b6d4',       // Cyan 500
-  white: '#f1f5f9',      // Slate 100
+  black: '#1e293b',
+  red: '#ef4444',
+  green: '#10b981',
+  yellow: '#f59e0b',
+  blue: '#3b82f6',
+  magenta: '#d946ef',
+  cyan: '#06b6d4',
+  white: '#f1f5f9',
 
-  // Bright Variants
-  brightBlack: '#64748b', // Slate 500
-  brightRed: '#f87171',   // Red 400
-  brightGreen: '#34d399', // Emerald 400
-  brightYellow: '#fbbf24',// Amber 400
-  brightBlue: '#60a5fa',  // Blue 400
-  brightMagenta: '#e879f9',// Fuchsia 400
-  brightCyan: '#22d3ee',  // Cyan 400
-  brightWhite: '#ffffff', // White
+  brightBlack: '#64748b',
+  brightRed: '#f87171',
+  brightGreen: '#34d399',
+  brightYellow: '#fbbf24',
+  brightBlue: '#60a5fa',
+  brightMagenta: '#e879f9',
+  brightCyan: '#22d3ee',
+  brightWhite: '#ffffff',
 };
 
 const WELCOME_BANNER = `
@@ -47,11 +46,10 @@ const WELCOME_BANNER = `
 \x1b[0;90m      SECURE WEB TERMINAL v2.0                      \x1b[0m
 \r\n`;
 
-export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSocketReady }) => {
+export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, socket, onDisconnect }) => {
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const socketRef = useRef<WebSocket | null>(null);
 
   // Initialize Terminal
   useEffect(() => {
@@ -59,7 +57,7 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSo
 
     const term = new Terminal({
       cursorBlink: true,
-      cursorStyle: 'bar', // 'block' | 'underline' | 'bar'
+      cursorStyle: 'bar',
       cursorWidth: 2,
       fontFamily: '"JetBrains Mono", "Fira Code", monospace',
       fontSize: 14,
@@ -74,86 +72,82 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSo
 
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-
     term.open(terminalRef.current);
-    fitAddon.fit();
+    
+    // Initial Fit
+    requestAnimationFrame(() => fitAddon.fit());
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
 
-    // Initial Welcome Message
+    // Write banner
     term.write(WELCOME_BANNER);
-    term.writeln(`\x1b[38;5;240m[SYSTEM] Initializing secure connection to ${config?.host}...\x1b[0m`);
+    term.writeln(`\x1b[38;5;240m[SYSTEM] Session active: ${config?.username}@${config?.host}\x1b[0m\r\n`);
 
-    // Establish WebSocket Connection
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}`;
-    const ws = new WebSocket(wsUrl);
-
-    ws.onopen = () => {
-      // Send connection credentials
-      if (config) {
-        ws.send(JSON.stringify({ type: 'CONNECT', config }));
-      }
-      onSocketReady(ws);
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type === 'TERM_DATA') {
-          term.write(msg.data);
-        } else if (msg.type === 'STATUS') {
-          if (msg.status === 'CONNECTED') {
-             // We don't print "Connected" here to avoid cluttering the shell prompt
-             // The shell prompt itself is indication enough
-             fitAddon.fit();
-             ws.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
-          } else if (msg.status === 'DISCONNECTED') {
-             term.writeln('\r\n\x1b[1;31m[!] Connection Terminated by Server.\x1b[0m');
+    // Setup Resize Observer for the container
+    // This fixes the glitch where terminal renders weirdly if container is hidden/small initially
+    const resizeObserver = new ResizeObserver(() => {
+      if (active) {
+        requestAnimationFrame(() => {
+          fitAddon.fit();
+          // Inform server of new size
+          if (socket && socket.readyState === WebSocket.OPEN) {
+             socket.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
           }
-        } else if (msg.type === 'ERROR') {
-          term.writeln(`\r\n\x1b[1;31m[!] Error: ${msg.message}\x1b[0m`);
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    };
-
-    ws.onerror = () => {
-      term.writeln('\r\n\x1b[1;31m[!] Fatal: WebSocket Connection Failed.\x1b[0m');
-    };
-
-    socketRef.current = ws;
-
-    // Send Terminal Input to Server
-    term.onData((data) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: 'TERM_INPUT', data }));
+        });
       }
     });
+    
+    resizeObserver.observe(terminalRef.current);
 
-    // Handle Resize
-    const handleResize = () => {
-        fitAddon.fit();
-        if (ws.readyState === WebSocket.OPEN && term) {
-          ws.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
+    // Socket Handling
+    if (socket) {
+      socket.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'TERM_DATA') {
+            term.write(msg.data);
+          } else if (msg.type === 'STATUS' && msg.status === 'DISCONNECTED') {
+            term.writeln('\r\n\x1b[1;31m[!] Connection Terminated.\x1b[0m');
+            onDisconnect();
+          } else if (msg.type === 'ERROR') {
+            term.writeln(`\r\n\x1b[1;31m[!] Error: ${msg.message}\x1b[0m`);
+          }
+        } catch (e) {
+          console.error(e);
         }
-    };
-    window.addEventListener('resize', handleResize);
+      };
+
+      socket.onclose = () => {
+        term.writeln('\r\n\x1b[1;31m[!] WebSocket Closed.\x1b[0m');
+      };
+
+      // Send Input
+      term.onData((data) => {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'TERM_INPUT', data }));
+        }
+      });
+      
+      // Initial resize sync
+      setTimeout(() => {
+        fitAddon.fit();
+        if(socket.readyState === WebSocket.OPEN) {
+          socket.send(JSON.stringify({ type: 'TERM_RESIZE', cols: term.cols, rows: term.rows }));
+        }
+      }, 100);
+    }
 
     return () => {
-      window.removeEventListener('resize', handleResize);
+      resizeObserver.disconnect();
       term.dispose();
-      ws.close();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [config]);
+  }, [socket]); // Re-run if socket changes (initial connection)
 
-  // Handle Active Tab Switch
+  // Handle Tab Switching visibility fix
   useEffect(() => {
     if (active && fitAddonRef.current) {
-      // Small delay to ensure container is rendered
       setTimeout(() => {
         fitAddonRef.current?.fit();
         xtermRef.current?.focus();
@@ -164,14 +158,10 @@ export const TerminalView: React.FC<TerminalViewProps> = ({ active, config, onSo
   return (
     <div className={`h-full w-full bg-slate-950 p-4 ${active ? 'block' : 'hidden'}`}>
       <div className="h-full w-full relative">
-        {/* Terminal Container */}
         <div 
           ref={terminalRef} 
           className="relative h-full w-full rounded-lg overflow-hidden bg-[#020617] border border-slate-800 shadow-xl"
-          style={{
-            // Inner padding to keep text away from edges
-            padding: '12px 0 0 12px' 
-          }}
+          style={{ padding: '12px 0 0 12px' }}
         />
       </div>
     </div>

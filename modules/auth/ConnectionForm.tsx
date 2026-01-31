@@ -2,14 +2,15 @@ import React, { useState } from 'react';
 import { SSHConnectionConfig } from '../../types';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Input';
-import { Terminal, Lock, Server } from 'lucide-react';
+import { Terminal, Lock, Server, AlertCircle } from 'lucide-react';
 
 interface ConnectionFormProps {
   onConnect: (config: SSHConnectionConfig) => void;
   isLoading: boolean;
+  error?: string | null;
 }
 
-export const ConnectionForm: React.FC<ConnectionFormProps> = ({ onConnect, isLoading }) => {
+export const ConnectionForm: React.FC<ConnectionFormProps> = ({ onConnect, isLoading, error }) => {
   const [config, setConfig] = useState<SSHConnectionConfig>({
     host: '192.168.1.10',
     port: 22,
@@ -72,6 +73,13 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({ onConnect, isLoa
           onChange={(e) => setConfig({...config, password: e.target.value})}
           icon={<Lock className="w-4 h-4" />}
         />
+        
+        {error && (
+          <div className="flex items-center gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm animate-pulse">
+            <AlertCircle className="w-4 h-4 flex-shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
 
         <div className="pt-4">
           <Button 
@@ -85,7 +93,7 @@ export const ConnectionForm: React.FC<ConnectionFormProps> = ({ onConnect, isLoa
         </div>
 
         <p className="text-xs text-center text-slate-500 mt-4">
-          By connecting, you agree to the mock SSH simulation protocols.
+          Connection secured via SSH tunneling.
         </p>
       </form>
     </div>

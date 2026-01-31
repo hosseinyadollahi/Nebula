@@ -11,21 +11,64 @@ function App() {
   const [activeTab, setActiveTab] = useState<TabView>(TabView.TERMINAL);
   const [activeConfig, setActiveConfig] = useState<SSHConnectionConfig | null>(null);
   const [socket, setSocket] = useState<WebSocket | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   const handleConnect = (config: SSHConnectionConfig) => {
     setStatus(ConnectionStatus.CONNECTING);
+    setAuthError(null);
     setActiveConfig(config);
-    // The actual socket connection happens inside TerminalView when config is set
-  };
 
-  const handleSocketReady = (ws: WebSocket) => {
-    setSocket(ws);
-    setStatus(ConnectionStatus.CONNECTED);
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}`;
+    const ws = new WebSocket(wsUrl);
+
+    ws.onopen = () => {
+      // Step 1: Send credentials immediately
+      ws.send(JSON.stringify({ type: 'CONNECT', config }));
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        
+        // Step 2: Listen for initial connection status
+        if (msg.type === 'STATUS' && msg.status === 'CONNECTED') {
+          // Auth Successful
+          setSocket(ws);
+          setStatus(ConnectionStatus.CONNECTED);
+          // Remove this temporary listener so TerminalView can take over
+          ws.onmessage = null; 
+        } else if (msg.type === 'ERROR' || (msg.type === 'STATUS' && msg.status === 'DISCONNECTED')) {
+          // Auth Failed
+          setAuthError(msg.message || 'Authentication failed or connection refused.');
+          setStatus(ConnectionStatus.DISCONNECTED);
+          ws.close();
+        }
+      } catch (e) {
+        console.error("Auth handshake error", e);
+        setAuthError("Invalid server response.");
+        setStatus(ConnectionStatus.DISCONNECTED);
+        ws.close();
+      }
+    };
+
+    ws.onerror = () => {
+      setAuthError("WebSocket connection failed.");
+      setStatus(ConnectionStatus.DISCONNECTED);
+    };
+
+    ws.onclose = () => {
+      if (status === ConnectionStatus.CONNECTING) {
+         // If closed while connecting, it's likely an auth failure handled above, 
+         // or a network drop.
+      }
+    };
   };
 
   const handleDisconnect = () => {
     setStatus(ConnectionStatus.DISCONNECTED);
     setActiveConfig(null);
+    setAuthError(null);
     if (socket) {
         socket.close();
         setSocket(null);
@@ -33,28 +76,26 @@ function App() {
   };
 
   if (status === ConnectionStatus.DISCONNECTED || status === ConnectionStatus.CONNECTING) {
-    // Note: We show the form even during CONNECTING, TerminalView handles the logic in background if we wanted, 
-    // but here we keep the UI simple. To actually start the terminal, we need to transition.
-    // For this implementation, we simply render the main view immediately if config is set, 
-    // letting TerminalView handle the "Connecting..." state visually.
-    if (!activeConfig) {
-      return (
-        <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
-          {/* Decorative background elements */}
-          <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-            <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/10 rounded-full blur-[100px]" />
-            <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[100px]" />
-          </div>
-          
-          <ConnectionForm onConnect={handleConnect} isLoading={false} />
-          
-          <div className="mt-8 flex items-center gap-2 text-emerald-500/50 text-xs uppercase tracking-widest font-bold">
-             <ShieldCheck className="w-4 h-4" />
-             <span>Secure WebSocket Tunnel</span>
-          </div>
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+        {/* Decorative background elements */}
+        <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-emerald-500/10 rounded-full blur-[100px]" />
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-blue-500/10 rounded-full blur-[100px]" />
         </div>
-      );
-    }
+        
+        <ConnectionForm 
+          onConnect={handleConnect} 
+          isLoading={status === ConnectionStatus.CONNECTING} 
+          error={authError}
+        />
+        
+        <div className="mt-8 flex items-center gap-2 text-emerald-500/50 text-xs uppercase tracking-widest font-bold">
+            <ShieldCheck className="w-4 h-4" />
+            <span>Secure WebSocket Tunnel</span>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -117,7 +158,8 @@ function App() {
           <TerminalView 
             active={activeTab === TabView.TERMINAL} 
             config={activeConfig}
-            onSocketReady={handleSocketReady}
+            socket={socket}
+            onDisconnect={handleDisconnect}
           />
           <ScpManager 
             active={activeTab === TabView.SCP} 
