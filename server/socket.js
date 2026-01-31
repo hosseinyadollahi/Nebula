@@ -50,6 +50,15 @@ export const setupWebSocket = (server) => {
              if (sshSession) sshSession.renameEntry(msg.oldPath, msg.newPath);
              break;
           
+          case 'SFTP_COPY':
+             if (sshSession) sshSession.copyEntry(msg.source, msg.dest);
+             break;
+
+          case 'SFTP_MOVE':
+             // Move is essentially rename in SFTP
+             if (sshSession) sshSession.renameEntry(msg.source, msg.dest);
+             break;
+          
           case 'SFTP_CHMOD':
              if (sshSession) sshSession.chmodEntry(msg.path, msg.mode);
              break;

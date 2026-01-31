@@ -166,11 +166,35 @@ export class SSHSession {
     if (!this.sftp) return;
     this.sftp.rename(oldPath, newPath, (err) => {
         if (err) {
-            this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Rename Failed: ' + err.message }));
+            this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Operation Failed: ' + err.message }));
         } else {
-            this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Renamed successfully', action: 'rename' }));
+            this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Operation successful', action: 'rename' }));
         }
     });
+  }
+
+  copyEntry(sourcePath, targetPath) {
+      // SFTP protocol doesn't support remote-to-remote copy efficiently.
+      // We use the shell channel to execute 'cp -r'.
+      // Escape double quotes for safety
+      const safeSource = sourcePath.replace(/"/g, '\\"');
+      const safeTarget = targetPath.replace(/"/g, '\\"');
+      
+      const command = `cp -r "${safeSource}" "${safeTarget}"`;
+      
+      this.conn.exec(command, (err, stream) => {
+          if (err) {
+              this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: 'Copy Exec Error: ' + err.message }));
+              return;
+          }
+          stream.on('close', (code, signal) => {
+              if (code === 0) {
+                  this.socket.send(JSON.stringify({ type: 'SFTP_ACTION_SUCCESS', message: 'Copied successfully', action: 'copy' }));
+              } else {
+                  this.socket.send(JSON.stringify({ type: 'SFTP_ERROR', message: `Copy failed with code ${code}` }));
+              }
+          });
+      });
   }
 
   chmodEntry(path, mode) {

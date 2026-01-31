@@ -5,7 +5,8 @@ import {
   Edit3, Save, X, UploadCloud, FileCode, Search,
   Download, Trash2, FolderPlus, FilePlus, Archive, 
   LayoutGrid, List as ListIcon, MoreHorizontal,
-  ChevronRight, HardDrive, Shield, Type, FileImage, FileArchive
+  ChevronRight, HardDrive, Shield, Type, FileImage, FileArchive,
+  AlertTriangle, Copy, Scissors, Clipboard
 } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 
@@ -55,6 +56,9 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
   const [selectedFile, setSelectedFile] = useState<FileEntry | null>(null);
   const [sortField, setSortField] = useState<SortField>('name');
   const [sortDir, setSortDir] = useState<SortDirection>('asc');
+  
+  // Clipboard State for Copy/Paste
+  const [clipboard, setClipboard] = useState<{file: FileEntry, mode: 'copy' | 'cut'} | null>(null);
 
   // Actions / Modals
   const [contextMenu, setContextMenu] = useState<{x: number, y: number, file: FileEntry} | null>(null);
@@ -66,6 +70,15 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
   const [modalType, setModalType] = useState<'createFolder' | 'createFile' | 'rename' | 'permissions' | 'compress' | null>(null);
   const [modalInput, setModalInput] = useState('');
   const [compressionFormat, setCompressionFormat] = useState<'zip' | 'tar'>('zip');
+  
+  // Custom Confirmation Modal State
+  const [confirmModal, setConfirmModal] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    isDestructive?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
   
   const [transfer, setTransfer] = useState<TransferStatus>({ isActive: false, type: 'upload', filename: '', progress: 0 });
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -161,7 +174,16 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
 
   const handleEdit = (file: FileEntry) => {
       if (file.size > 500 * 1024) {
-          if(confirm("File > 500KB. Download instead?")) handleDownload(file);
+          setConfirmModal({
+              title: 'Large File Detected',
+              message: `The file "${file.name}" is larger than 500KB (${(file.size/1024).toFixed(1)} KB). Opening it in the browser may cause performance issues. Would you like to download it instead?`,
+              confirmLabel: 'Download',
+              isDestructive: false,
+              onConfirm: () => {
+                  handleDownload(file);
+                  setConfirmModal(null);
+              }
+          });
           return;
       }
       setEditingFile(file);
@@ -187,6 +209,39 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
       e.preventDefault();
       setContextMenu({ x: e.clientX, y: e.clientY, file });
       setSelectedFile(file);
+  };
+
+  // --- Clipboard Handlers ---
+  const handleCopy = (file: FileEntry) => {
+      setClipboard({ file, mode: 'copy' });
+      setContextMenu(null);
+  };
+
+  const handleCut = (file: FileEntry) => {
+      setClipboard({ file, mode: 'cut' });
+      setContextMenu(null);
+  };
+
+  const handlePaste = () => {
+      if (!clipboard) return;
+      
+      const source = clipboard.file.path;
+      // Construct dest path: currentPath / filename
+      const dest = remotePath === '/' 
+        ? `/${clipboard.file.name}` 
+        : `${remotePath}/${clipboard.file.name}`;
+      
+      setIsLoading(true);
+      
+      if (clipboard.mode === 'copy') {
+          socket?.send(JSON.stringify({ type: 'SFTP_COPY', source, dest }));
+          // Keep clipboard for multiple pastes
+      } else {
+          socket?.send(JSON.stringify({ type: 'SFTP_MOVE', source, dest }));
+          // Clear clipboard after move
+          setClipboard(null);
+      }
+      setContextMenu(null);
   };
 
   const executeModalAction = () => {
@@ -229,10 +284,17 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
   };
 
   const handleDelete = (file: FileEntry) => {
-      if(confirm(`Permanently delete ${file.name}?`)) {
-          setIsLoading(true);
-          socket?.send(JSON.stringify({ type: 'SFTP_DELETE', path: file.path }));
-      }
+      setConfirmModal({
+          title: 'Delete Item',
+          message: `Are you sure you want to permanently delete "${file.name}"? This action cannot be undone.`,
+          confirmLabel: 'Delete',
+          isDestructive: true,
+          onConfirm: () => {
+              setIsLoading(true);
+              socket?.send(JSON.stringify({ type: 'SFTP_DELETE', path: file.path }));
+              setConfirmModal(null);
+          }
+      });
   };
 
   const handleCompressRequest = (file: FileEntry) => {
@@ -305,6 +367,15 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
         </div>
 
         <div className="flex items-center gap-2">
+            {/* Clipboard Status Indicator */}
+            {clipboard && (
+                <div className="hidden md:flex items-center gap-2 px-3 py-1 bg-slate-800 rounded-full text-xs text-slate-400 border border-slate-700 animate-in fade-in slide-in-from-top-2">
+                    {clipboard.mode === 'copy' ? <Copy className="w-3 h-3"/> : <Scissors className="w-3 h-3"/>}
+                    <span className="max-w-[100px] truncate">{clipboard.file.name}</span>
+                    <button onClick={() => setClipboard(null)} className="hover:text-white"><X className="w-3 h-3"/></button>
+                </div>
+            )}
+            
             <Button onClick={() => { setModalType('createFolder'); setModalInput(''); }} variant="secondary" size="sm" className="gap-2 hidden md:flex"><FolderPlus className="w-4 h-4"/> New Folder</Button>
             <Button onClick={() => { setModalType('createFile'); setModalInput(''); }} variant="secondary" size="sm" className="gap-2 hidden md:flex"><FilePlus className="w-4 h-4"/> New File</Button>
             <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
@@ -455,6 +526,16 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
               {!contextMenu.file.isDirectory && (
                   <button onClick={() => { handleEdit(contextMenu.file); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-emerald-600/20 hover:text-emerald-400 flex items-center gap-2 text-sm"><Edit3 className="w-4 h-4"/> Edit</button>
               )}
+              
+              {/* Copy / Cut / Paste Section */}
+              <div className="my-1 border-t border-slate-700"/>
+              <button onClick={() => handleCopy(contextMenu.file)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Copy className="w-4 h-4"/> Copy</button>
+              <button onClick={() => handleCut(contextMenu.file)} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Scissors className="w-4 h-4"/> Cut</button>
+              {clipboard && (
+                 <button onClick={handlePaste} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm text-emerald-400"><Clipboard className="w-4 h-4"/> Paste</button>
+              )}
+              <div className="my-1 border-t border-slate-700"/>
+
               <button onClick={() => { setModalType('rename'); setModalInput(contextMenu.file.name); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Type className="w-4 h-4"/> Rename</button>
               <button onClick={() => { setModalType('permissions'); setModalInput('755'); setContextMenu(null); }} className="w-full text-left px-3 py-2 hover:bg-slate-700 flex items-center gap-2 text-sm"><Shield className="w-4 h-4"/> Permissions</button>
               <div className="my-1 border-t border-slate-700"/>
@@ -470,7 +551,7 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
           </div>
       )}
 
-      {/* --- Action Modal (Create/Rename/Permissions) --- */}
+      {/* --- Action Modal (Create/Rename/Permissions/Compress) --- */}
       {modalType && (
           <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
               <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95">
@@ -515,6 +596,34 @@ export const ScpManager: React.FC<ScpManagerProps> = ({ active, socket }) => {
                   </div>
               </div>
           </div>
+      )}
+
+      {/* --- In-App Confirmation Modal (Replaces Native Confirm) --- */}
+      {confirmModal && (
+        <div className="absolute inset-0 z-[60] bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+            <div className="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-sm shadow-2xl animate-in zoom-in-95 ring-1 ring-white/10">
+                <div className="flex items-center gap-3 mb-4">
+                    <div className={`p-3 rounded-full ${confirmModal.isDestructive ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'}`}>
+                        <AlertTriangle className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-lg font-bold text-white">{confirmModal.title}</h3>
+                </div>
+                
+                <p className="text-sm text-slate-400 mb-6 leading-relaxed">
+                    {confirmModal.message}
+                </p>
+                
+                <div className="flex justify-end gap-3">
+                    <Button variant="ghost" onClick={() => setConfirmModal(null)}>Cancel</Button>
+                    <Button 
+                        variant={confirmModal.isDestructive ? 'danger' : 'primary'} 
+                        onClick={confirmModal.onConfirm}
+                    >
+                        {confirmModal.confirmLabel}
+                    </Button>
+                </div>
+            </div>
+        </div>
       )}
 
       {/* --- Editor Modal --- */}
